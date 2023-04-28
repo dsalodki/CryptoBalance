@@ -56,7 +56,8 @@ namespace CryptoBalance.Utils
                     {
                         break;
                     }
-                    Balance.Data[(absoluteIndex, addresses[i])] = json.ElementAt(i);
+                    // Id starts from 1 , absoluteIndex from 0
+                    Balance.Data[(absoluteIndex + 1, addresses[i])] = json.ElementAt(i);
                     absoluteIndex++;
                 }
                 Balance.IsSynchrozed = false;
