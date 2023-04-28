@@ -1,0 +1,130 @@
+﻿@page "/"
+@using CryptoBalance.Models;
+@using CryptoBalance.Utils;
+@using Dapper;
+@using Npgsql;
+@using System.Text.Json;
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.5.0/font/bootstrap-icons.css">
+
+<PageTitle>Index</PageTitle>
+
+<table class="table">
+    <thead>
+        <tr>
+            <td>ID</td>
+            <td>Address</td>
+            <td @onclick="ChangeSortOrder">Balance<i class="bi @(_isSortOrderAscending ? "bi-arrow-up" : "bi-arrow-down")"></i></td>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var item in _data.Results)
+        {
+            <tr>
+                <td>@item.Id</td>
+                <td>@item.Address</td>
+                <td>@item.Balance</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<div>
+    <a @onclick="GoToFirstPage">1</a>
+    <a class="@(_page == 1 ? "disabled" : "")" @onclick="GoToPrevPage">Prev</a>
+    <a class="active">@_page</a>
+    <a class="@(_page == _data.PageCount ? "disabled" : "")" @onclick="GoToNextPage">Next</a>
+    <a @onclick="GoToLastPage">@_data.PageCount</a>
+</div>
+
+
+@code {
+    private bool _isSortOrderAscending = true;
+    private PagedResult<Item> _data = new PagedResult<Item>();
+    private int _page = 1;
+    private const int PageSize = 10;
+
+    protected override void OnInitialized()
+    {
+        FetchData();
+    }
+
+    private void FetchData()
+    {
+        Task.Run(async () => await FetchDataAsync()).Wait();
+    }
+
+    private async Task FetchDataAsync()
+    {
+        _data = new PagedResult<Item>();
+        _data.PageSize = PageSize;
+        _data.CurrentPage = _page;
+
+        using var con = new NpgsqlConnection(
+    connectionString: "Server=127.0.0.1;Port=5432;User Id=postgres;Password=qaz123QAZ!@#;Database=postgres;");
+        con.Open();
+
+        _data.PageCount = (await con.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM public.\"Wallets\"") + PageSize - 1) / PageSize;
+
+        var res = (await con.QueryAsync<Item>($"SELECT * FROM public.\"Wallets\" ORDER BY \"Id\" {(_isSortOrderAscending ? "ASC" : "DESC")} OFFSET {PageSize * (_page - 1)} ROWS FETCH FIRST {PageSize} ROW ONLY")).ToArray();
+
+        using var httpClient = new HttpClient();
+
+        var response = await httpClient.PostAsJsonAsync("https://localhost:7040/api/Balance", res.Select(i => i.Address));
+        var content = await response.Content.ReadAsStringAsync();
+        var json = JsonSerializer.Deserialize<IEnumerable<decimal>>(content);
+
+        for (var i = 0; i < res.Length; i++)
+        {
+            res[i].Balance = json.ElementAt(i);
+        }
+
+        _data.Results = res;
+    }
+
+    private void GoToFirstPage()
+    {
+        if (_page == 1)
+        {
+            return;
+        }
+        _page = 1;
+        FetchData();
+    }
+
+    private void GoToLastPage()
+    {
+        if (_page == _data.PageCount)
+        {
+            return;
+        }
+        _page = _data.PageCount;
+        FetchData();
+    }
+
+    private void GoToPrevPage()
+    {
+        if (_page == 1)
+        {
+            return;
+        }
+        _page--;
+        FetchData();
+    }
+
+    private void GoToNextPage()
+    {
+        if (_page == _data.PageCount)
+        {
+            return;
+        }
+        _page++;
+        FetchData();
+    }
+
+    private void ChangeSortOrder()
+    {
+        _isSortOrderAscending = !_isSortOrderAscending;
+        FetchData();
+    }
+}
