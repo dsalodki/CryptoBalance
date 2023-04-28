@@ -10,7 +10,7 @@ namespace API.Controllers
     public class BalanceController : ControllerBase
     {
         [HttpPost]
-        [ResponseCache(Duration = 60, Location = ResponseCacheLocation.Any, NoStore = false)]
+        //[ResponseCache(Duration = 60, Location = ResponseCacheLocation.Any, NoStore = false)]
         public async Task<IEnumerable<decimal>> GetBalances([FromBody] IEnumerable<string> addresses)
         {
             // https://mainnet.infura.io/v3/fe4610a7299e43829297838b0697061c

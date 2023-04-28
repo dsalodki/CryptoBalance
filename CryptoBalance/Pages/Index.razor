@@ -4,6 +4,8 @@
 @using Dapper;
 @using Npgsql;
 @using System.Text.Json;
+@using System.Timers;
+@using Timer = System.Timers.Timer;
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.5.0/font/bootstrap-icons.css">
 
@@ -30,19 +32,44 @@
 </table>
 
 <div>
-    <a @onclick="GoToFirstPage">1</a>
-    <a class="@(_page == 1 ? "disabled" : "")" @onclick="GoToPrevPage">Prev</a>
-    <a class="active">@_page</a>
-    <a class="@(_page == _data.PageCount ? "disabled" : "")" @onclick="GoToNextPage">Next</a>
-    <a @onclick="GoToLastPage">@_data.PageCount</a>
+    <a style="cursor: pointer" @onclick="GoToFirstPage">1</a>
+    <a style="cursor: @(_page == 1 ? "not-allowed" : "pointer")" class="@(_page == 1 ? "disabled" : "")" @onclick="GoToPrevPage">Prev</a>
+    <a style="cursor: pointer" class="active">@_page</a>
+    <a style="cursor: @(_page == _data.PageCount ? "not-allowed" : "pointer")" class="@(_page == _data.PageCount ? "disabled" : "")" @onclick="GoToNextPage">Next</a>
+    <a style="cursor: pointer" @onclick="GoToLastPage">@_data.PageCount</a>
 </div>
 
 
 @code {
     private bool _isSortOrderAscending = true;
-    private PagedResult<Item> _data = new PagedResult<Item>();
     private int _page = 1;
+    private PagedResult<Item> _data = new PagedResult<Item>() { CurrentPage = 1 };
     private const int PageSize = 10;
+
+    private Timer _timer;
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _timer = new Timer();
+            _timer.Interval = 10000;
+            _timer.Elapsed += OnTimerInterval;
+            _timer.AutoReset = true;
+            _timer.Enabled = true;
+        }
+        base.OnAfterRender(firstRender);
+    }
+
+    private void OnTimerInterval(object sender, ElapsedEventArgs e)
+    {
+        if (!Balance.IsSynchrozed)
+        {
+            FetchData();
+            Balance.IsSynchrozed = true;
+            InvokeAsync(() => StateHasChanged());
+        }
+    }
 
     protected override void OnInitialized()
     {
@@ -51,35 +78,17 @@
 
     private void FetchData()
     {
-        Task.Run(async () => await FetchDataAsync()).Wait();
-    }
+        _data.PageCount = (Balance.Data.Count(d => d.Value != null) + PageSize - 1) / PageSize;
 
-    private async Task FetchDataAsync()
-    {
-        _data = new PagedResult<Item>();
-        _data.PageSize = PageSize;
-        _data.CurrentPage = _page;
+        var query = Balance.Data.Where(d => d.Value != null);
+        query = _isSortOrderAscending ? query.OrderBy(d => d.Value) : query.OrderByDescending(d => d.Value);
 
-        using var con = new NpgsqlConnection(
-    connectionString: "Server=127.0.0.1;Port=5432;User Id=postgres;Password=qaz123QAZ!@#;Database=postgres;");
-        con.Open();
-
-        _data.PageCount = (await con.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM public.\"Wallets\"") + PageSize - 1) / PageSize;
-
-        var res = (await con.QueryAsync<Item>($"SELECT * FROM public.\"Wallets\" ORDER BY \"Id\" {(_isSortOrderAscending ? "ASC" : "DESC")} OFFSET {PageSize * (_page - 1)} ROWS FETCH FIRST {PageSize} ROW ONLY")).ToArray();
-
-        using var httpClient = new HttpClient();
-
-        var response = await httpClient.PostAsJsonAsync("https://localhost:7040/api/Balance", res.Select(i => i.Address));
-        var content = await response.Content.ReadAsStringAsync();
-        var json = JsonSerializer.Deserialize<IEnumerable<decimal>>(content);
-
-        for (var i = 0; i < res.Length; i++)
-        {
-            res[i].Balance = json.ElementAt(i);
-        }
-
-        _data.Results = res;
+        _data.Results = query.Skip((_page -1)* PageSize).Take(PageSize).Select(d => new Item
+            {
+                Id = d.Key.Id,
+                Address = d.Key.Address,
+                Balance = d.Value.Value
+            }).ToArray();
     }
 
     private void GoToFirstPage()
